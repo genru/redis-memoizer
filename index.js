@@ -1,6 +1,5 @@
 const crypto = require('crypto');
 const redisLock = require('redis-lock');
-const { promisify } = require('util');
 
 const sha1 = str => crypto.createHmac('sha1', 'memo').update(str).digest('hex');
 
@@ -10,9 +9,9 @@ const internalNotFoundInRedis = '__redis_memoizer_not_found';
 const defaultTtl = 120000;
 
 module.exports = client => {
-  const redisGet = promisify(client.get).bind(client);
-  const redisPsetex = promisify(client.psetex).bind(client);
-  const lock = promisify(redisLock(client));
+  const redisGet = client.get.bind(client);
+  const redisPsetex = client.PSETEX.bind(client);
+  const lock = redisLock(client);
 
   const getResultFromRedis = async (ns, key) => {
     const valueFromRedis = await redisGet(`memos:${ns}:${key}`)
@@ -42,10 +41,9 @@ module.exports = client => {
     if(!name) throw new Error('You must provide a options.name for the function to memoize.');
 
     const ttlfn = typeof ttl === 'function' ? ttl : () => ttl;
-    
+
     const memoizedFunction = async function(...args) {
       const argsStringified = sha1(JSON.stringify(args));
-
       // Return directly without locks if possible
       const redisCacheValue = await getResultFromRedis(name, argsStringified);
       if(redisCacheValue !== internalNotFoundInRedis) return redisCacheValue;
@@ -59,14 +57,12 @@ module.exports = client => {
 
         const result = await fn.apply(this, args);
         const ttl = ttlfn(result);
-
         await writeResultToRedis(
           name,
           argsStringified,
           result,
           typeof ttl === 'number' ? ttl : defaultTtl
         );
-
         return result;
       } catch(e) {
         throw e;
@@ -74,7 +70,10 @@ module.exports = client => {
         unlock();
       }
     };
-
+    memoizedFunction.clear = async function(...args) {
+      const key = sha1(JSON.stringify(args));
+      await client.DEL(`memos:${name}:${key}`)
+    }
     return memoizedFunction;
   }
 };

@@ -5,7 +5,7 @@ const should = require('should');
 const { promisify } = require('util');
 const delay = require('delay2');
 
-const redisDel = promisify(client.del).bind(client);
+const redisDel = client.del.bind(client);
 
 const hash = string => crypto.createHmac('sha1', 'memo').update(string).digest('hex');
 
@@ -14,33 +14,41 @@ const clearCache = async (fnName, args = []) => {
 }
 
 describe('redis-memoizer', () => {
+  before(async function() {
+    await client.connect();
+  })
   after(process.exit);
 
   it('should memoize a value correctly', async () => {
     const functionDelayTime = 10;
     let callCount = 0;
-    const functionToMemoize = async (val1, val2) => {
-      callCount++;
-      await delay(functionDelayTime);
-      return { val1, val2 };
-    };
-    const memoized = memoize(functionToMemoize, { name: 'testFn' });
+    try {
+      const functionToMemoize = async (val1, val2) => {
+        callCount++;
+        await delay(functionDelayTime);
+        return { val1, val2 };
+      };
+      const memoized = memoize(functionToMemoize, { name: 'testFn' });
+      let start = Date.now();
+      let { val1, val2 } = await memoized(1, 2);
+      val1.should.equal(1);
+      val2.should.equal(2);
+      (Date.now() - start >= functionDelayTime).should.be.true;		// First call should go to the function itself
+      callCount.should.equal(1);
 
-    let start = Date.now();
-    let { val1, val2 } = await memoized(1, 2);
-    val1.should.equal(1);
-    val2.should.equal(2);
-    (Date.now() - start >= functionDelayTime).should.be.true;		// First call should go to the function itself
-    callCount.should.equal(1);
+      start = Date.now();
+      ({ val1, val2 } = await memoized(1, 2));
+      val1.should.equal(1);
+      val2.should.equal(2);
+      (Date.now() - start < functionDelayTime).should.be.true;		// Second call should be faster
+      callCount.should.equal(1);
 
-    start = Date.now();
-    ({ val1, val2 } = await memoized(1, 2));
-    val1.should.equal(1);
-    val2.should.equal(2);
-    (Date.now() - start < functionDelayTime).should.be.true;		// Second call should be faster
-    callCount.should.equal(1);
+      // await clearCache('testFn', [1, 2]);
+      await memoized.clear(1,2)
 
-    await clearCache('testFn', [1, 2]);
+    } catch(e) {
+      console.error(e)
+    }
   });
 
   it('should memoize separate function separately', async () => {
@@ -54,8 +62,10 @@ describe('redis-memoizer', () => {
     (await memoizedFn2('y')).should.equal(2);
     (await memoizedFn1('x')).should.equal(1);
 
-    await clearCache('function1', ['x']);
-    await clearCache('function2', ['y']);
+    // await clearCache('function1', ['x']);
+    await memoizedFn1.clear( 'x');
+    // await clearCache('function2', ['y']);
+    await memoizedFn2.clear( 'y')
   });
 
   it('should prevent a cache stampede', async () => {
@@ -158,7 +168,7 @@ describe('redis-memoizer', () => {
     (Date.now() - start >= functionDelayTime).should.be.true;
     arg1.should.eql({ input: 'data' });
     some.should.eql(['other', 'data']);
-    
+
     start = Date.now();
     ({ arg1, some } = await memoized({ input: 'data' }));
     (Date.now() - start <= functionDelayTime).should.be.true;

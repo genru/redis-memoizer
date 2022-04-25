@@ -13,7 +13,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "redis-lock": "github:genru/redis-lock"
+    "redis-lock": "https://github.com/genru/redis-lock/tarball/master"
   },
   "devDependencies": {
     "redis": "^4.x",
